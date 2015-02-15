@@ -8,8 +8,7 @@
 
 #include "short.h"
 
-#define HANDLECHARS 62
-#define HANDLELEN 16
+#define HANDLECHARS 61
 
 static const char* handlealph = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVXYZ0123456789";
 

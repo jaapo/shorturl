@@ -5,12 +5,14 @@
 #include <errno.h>
 #include <string.h>
 
-#include <signal.h>
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+
+#include <signal.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netdb.h>
 
 #include "short.h"
 #include "hasht.h"
@@ -19,46 +21,34 @@
 #define MIN(a,b) (a<b?a:b)
 #define STREQU(a,b) !strncmp(a,b,MIN(strlen(a),strlen(b)))
 
+#define BUFSIZE 2048
+
 static struct hashtable ht;
-static char* DOCROOT;
 
-int file_response(char* buffer, int buflen, char* req_fn) {
-	int len = -1;
-	int filesize, err, fd, left;
-	struct stat fstat;
-	char filename[1024];
-	int fnlen;
+int error_response(char* buffer, int buflen, int code) {
+	int len;
+	char* errtxt;
 
-	fnlen = snprintf(filename, sizeof filename, "%s%s", DOCROOT, req_fn[0]=='/' ? req_fn+1 : req_fn);
-	if (fnlen>sizeof filename) {
-		printf("requested filename too long\n");
-		exit(1);
+	switch (code) {
+		case 400:
+			errtxt = "Bad Request";
+			break;
+		case 404:
+			errtxt = "Not Found";
+			break;
+		case 413:
+			errtxt = "Request Entity Too Large";
+			break;
+		case 500:
+		default:
+			code = 500;
+			errtxt = "Internal Server Error";
 	}
 
-	left = buflen;
-	err = stat(filename, &fstat);
-
-	if ((err == -1 && errno == ENOENT) || !S_ISREG(fstat.st_mode)) {
-		len = snprintf(buffer, buflen, "HTTP/1.1 404 Not Found\r\n\r\n");
-		if (len > buflen) {
-			printf("buffer too small\n");
-			exit(1);
-		}
-	} else if (err == 0) {
-		fd = open(filename, O_RDONLY);
-		SYSCALLERR(fd, "file_response: open");
-		filesize = fstat.st_size;
-		len = snprintf(buffer, buflen, "HTTP/1.1 200 OK\r\nLength: %d\r\n\r\n", filesize);
-		left -= len;
-		err = read(fd, &buffer[len], left);
-		SYSCALLERR(err, "read");
-		if (err != filesize) {
-			printf("buffer too small\n");
-			exit(1);
-		}
-		len += err;
-	} else {
-		SYSCALLERR(err, "file_response: stat()");
+	len = snprintf(buffer, buflen, "HTTP/1.1 %d %s\r\n\r\n", code, errtxt);
+	if (len>=buflen) {
+		printf("too small buffer for error response");
+		exit(1);
 	}
 
 	return len;
@@ -87,12 +77,19 @@ int www_decode(char* str) {
 }
 
 void httpreq(int sd) {
-	char buffer[2048];
-	char content[1024];
-	read(sd, buffer, sizeof(buffer));
-	
+	char buffer[BUFSIZE];
+	char content[BUFSIZE];
 	int reslen, len;
 	char *line, *req, *res;
+
+	len = read(sd, buffer, sizeof buffer);
+	if (len == sizeof buffer) {
+		printf("too long request\n");
+		reslen = error_response(buffer, sizeof buffer, 413);
+		goto done;
+	}
+	
+	res = buffer;
 	req = strtok(buffer, "\n");
 
 	int content_len = 0;
@@ -101,8 +98,9 @@ void httpreq(int sd) {
 			content_len = atoi(line+16);
 
 			if (content_len > sizeof content-1) {
-				printf("too long request body\n");
-				exit(1);
+				printf("too long request\n");
+				reslen = error_response(buffer, sizeof buffer, 413);
+				goto done;
 			}
 		} else if (line[0] == '\r' && line[1] == '\0') {
 			//end of header, rest is content
@@ -120,53 +118,53 @@ void httpreq(int sd) {
 		if (url) {
 			reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 301 Moved Permanently\r\nLocation: %s\r\n\r\n", url);
 		} else {
-			reslen = file_response(buffer, sizeof buffer, surl);
+			reslen = error_response(buffer, sizeof buffer, 404);
 		}
 
 		if (reslen >= sizeof buffer) {
+			reslen = error_response(buffer, sizeof buffer, 500);
 			printf("too small buffer\n");
-			exit(1);
 		}
-
-		res = buffer;
 	} else if (STREQU("POST /shorten ", req)) {
 		char* tmp = strtok(content, "=\n");
 
 		if (!STREQU(tmp, "url")) {
+			reslen = error_response(buffer, sizeof buffer, 400);
 			printf("unknown parameter: %s\n", tmp);
-			return;
+			goto done;
 		}
 
 		char* url = strtok(NULL, "=\n");
 		if ( (len = www_decode(url)) == -1 ) {
+			reslen = error_response(buffer, sizeof buffer, 400);
 			printf("param decoding error\n");
-			exit(1);
+			goto done;
 		}
 
 		uint64_t urlid = save_url(&ht, url, len);
-		char shorturl[32];
+		char shorturl[HANDLELEN];
 		int surl_len = strlen(shorturl);
 
 		key_to_str(urlid, shorturl);
-		printf("shortened %lu, %s\n", urlid, shorturl);
+		printf("shortened %s => %s\n", url, shorturl);
 		reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 200 OK\r\nLength: %d\r\nContent-Type: text/plain\r\n\r\n%s", surl_len, shorturl);
-
-		res = buffer;
 	} else {
-		printf("unknown request%s\n", req);
+		reslen = error_response(buffer, sizeof buffer, 400);
+		printf("unknown request %s\n", req);
+		goto done;
 	}
 
+done:
 	write(sd, res, reslen);
 }
 
 int main(int argc, char** argv) {
-	if (argc != 3) {
-		printf("usage: %s port docroot\n", argv[0]);
+	if (argc != 2) {
+		printf("usage: %s port\n", argv[0]);
 		exit(1);
 	}
 
-	DOCROOT = argv[2];
-	ht = ht_init(100);
+	ht = ht_init(10);
 
 	int listsd, err;
 	struct sockaddr_in listaddr;
@@ -198,9 +196,15 @@ int main(int argc, char** argv) {
 	SYSCALLERR(err, "listen")
 
 	int clisd;
+	char cliaddrstr[INET_ADDRSTRLEN];
 	for(;;) {
 		clisd = accept(listsd, (struct sockaddr*) cliaddr, &cliaddrlen);
 		SYSCALLERR(clisd, "accept");
+
+		if (inet_ntop(AF_INET, (struct sockaddr*) &cliaddr, cliaddrstr, cliaddrlen) == NULL)
+			SYSCALLERR(-1, "inet_ntop")
+		printf("connection from %s\n", cliaddrstr);
+
 		httpreq(clisd);
 		close(clisd);
 	}

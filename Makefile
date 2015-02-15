@@ -1,4 +1,4 @@
-CFLAGS=-Wall -pedantic -ggdb -std=c99
+CFLAGS=-Wall -pedantic -ggdb -D_POSIX_SOURCE -std=c99
 
 bin/main.o: main.c bin/short.o bin/hasht.o
 	gcc $(CFLAGS) -o bin/main.o bin/short.o bin/hasht.o main.c
