@@ -71,28 +71,7 @@ int file_response(char* buffer, int buflen, char* req_fn) {
 }
 
 int shortened_response(char* buffer, int buflen, char* shorturl) {
-	int fd, err, len, filesize;
-	struct stat tempstat;
-	char* template = DOCROOT "shortened.html";
-	char tempbuf[1024];
-	char databuf[2048];
-
-	fd = open(template, O_RDONLY);
-	SYSCALLERR(fd, "shortened: open");
-	err = fstat(fd, &tempstat);
-	SYSCALLERR(err, "shortened: fstat");
-	filesize = tempstat.st_size;
-
-	len = read(fd, tempbuf, sizeof tempbuf);
-	SYSCALLERR(len, "read");
-	if (len != filesize) {
-		printf("page template too big\n");
-		exit(1);
-	}
-
-	len = snprintf(databuf, sizeof databuf, tempbuf, shorturl);
-	len = snprintf(buffer, buflen, "HTTP/1.1 200 OK\r\nLength: %d\r\n\r\n%s", len, databuf);
-
+	len = 
 	return len;
 }
 
@@ -127,55 +106,65 @@ void httpreq(int sd) {
 	char *line, *req, *res;
 	req = strtok(buffer, "\n");
 
-	int len = 0;
-	while((line = strtok(NULL, "\n"))) {
+	int content_len = 0;
+	while( (line = strtok(NULL, "\n") )) {
 		if (STREQU(line, "Content-Length: ")) {
-			len = atoi(line+16);
-			if (len > sizeof content-1) {
+			content_len = atoi(line+16);
+
+			if (content_len > sizeof content-1) {
 				printf("too long request body\n");
 				exit(1);
 			}
-		}
-		if (line[0] == '\r' && line[1] == '\0') {
-			printf("lines ok\n");
+		} else if (line[0] == '\r' && line[1] == '\0') {
+			//end of header, rest is content
 			line = strtok(NULL, "\n");
 			memcpy(content, line, len);
 			content[len]='\0';
 			break;
 		}
-		printf("%s\n", line);
 	}
-
 
 	if (STREQU("GET ", req)) {
 		char* surl = strtok(req+4, " ");
-		char* url = get_url(&ht, str_to_key(surl[0]=='/'?surl+1:surl));
+		char* url = get_url(&ht, str_to_key(surl[0]=='/' ? surl+1 : surl));
+
 		if (url) {
-			reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 307 Temporary Redirect\r\nLocation: %s\r\n\r\n", url);
+			reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 301 Moved Permanently\r\nLocation: %s\r\n\r\n", url);
 		} else {
 			reslen = file_response(buffer, sizeof buffer, surl);
 		}
+
+		if (reslen >= sizeof buffer) {
+			printf("too small buffer\n");
+			exit(1);
+		}
+
 		res = buffer;
 	} else if (STREQU("POST /shorten ", req)) {
 		char* tmp = strtok(content, "=\n");
+
 		if (!STREQU(tmp, "url")) {
 			printf("unknown parameter: %s\n", tmp);
 			return;
 		}
+
 		char* url = strtok(NULL, "=\n");
 		if ( (len = www_decode(url)) == -1 ) {
 			printf("param decoding error\n");
 			exit(1);
 		}
-		printf("shorten, len: %d, url: %s\n", len, url);
+
 		uint64_t urlid = save_url(&ht, url, len);
 		char shorturl[32];
+		int surl_len = strlen(shorturl);
+
 		key_to_str(urlid, shorturl);
-		printf("%lu, %s\n", urlid, shorturl);
-		reslen = shortened_response(buffer, sizeof buffer, shorturl);
+		printf("shortened %lu, %s\n", urlid, shorturl);
+		reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 200 OK\r\nLength: %d\r\nContent-Type: text/plain\r\n\r\n%s", surl_len, shorturl);
+
 		res = buffer;
 	} else {
-		printf("omgf %s\n", req);
+		printf("unknown request%s\n", req);
 	}
 
 	write(sd, res, reslen);
@@ -193,8 +182,13 @@ int main(int argc, char** argv) {
 	struct sockaddr_in listaddr;
 	struct sockaddr_in* cliaddr = NULL;
 	socklen_t cliaddrlen = sizeof *cliaddr;
+
 	int port = atoi(argv[1]);
-	assert(port > 0 && port <= 65563);
+	if (!(port > 0 && port <= 65563)) {
+		printf("invalid port number\n");
+		exit(1);
+	}
+
 	socklen_t listaddrlen = sizeof(listaddr);
 
 	listaddr.sin_family = PF_INET;
@@ -220,5 +214,6 @@ int main(int argc, char** argv) {
 		httpreq(clisd);
 		close(clisd);
 	}
+
 	return 0;
 }
