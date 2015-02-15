@@ -4,25 +4,22 @@
 
 #include "hasht.h"
 
+#ifdef DEBUG
+#define DEBUGMSG(a,...) fprintf(stderr, "DEBUG: " a "\n", ##__VA_ARGS__);
+#else
+#define DEBUGMSG(a,...)
+#endif
+
 int hash_uint64(struct hashtable *ht, uint64_t keyval) {
-	int hashval = 0;
+	unsigned int hashval = 0;
 	int i = 0;
 	uint8_t* keyar = (uint8_t*) &keyval;
 
 	while (i<8) {
 		hashval += keyar[i++];
 	}
-	if (hashval<0)
-		hashval*=-1;
-	return hashval%ht->size;
-}
 
-int hash(struct hashtable *ht, char* value) {
-	int hashval = 0;
-	int i = 0;
-	while (value[i]) {
-		hashval += value[i++];
-	}
+	DEBUGMSG("hashed %lx to %d", keyval, hashval)
 	return hashval%ht->size;
 }
 
@@ -30,6 +27,7 @@ struct hashtable ht_init(int size) {
 	struct hashtable ht;
 	ht.size = size;
 	ht.table = calloc(size, sizeof(struct ht_entry));
+	DEBUGMSG("hashtable initialized, size: %d", size);
 
 	return ht;
 }
@@ -40,7 +38,9 @@ int ht_insert(struct hashtable *ht, uint64_t key, char* value) {
 	int index = hash_uint64(ht, key);
 	int count = ht->size;
 
+	DEBUGMSG("hashtable insert, key: %lu", key);
 	for(;;) {
+		DEBUGMSG("  index: %d, count: %d", index, count);
 		e = &ht->table[index];
 		if (e->key == 0) break;
 		index = (index+1)%ht->size;
@@ -62,16 +62,19 @@ char* ht_get(struct hashtable *ht, uint64_t key) {
 	int index = hash_uint64(ht, key);
 	int count = ht->size;
 
+	DEBUGMSG("hashtable get, key: %lu", key);
 	for(;;) {
+		DEBUGMSG("  index: %d, count: %d", index, count);
 		e = &ht->table[index];
 		if (e->key == key) break;
 		index = (index+1)%ht->size;
 
 		if (!count-- || e->key == 0) {
-			fprintf(stderr, "not found %ld\n", key);
+			DEBUGMSG("  not found, count=%d", count);
 			return NULL;
 		}
 	}
 
+	DEBUGMSG("  found, index=%d", index);
 	return e->value;
 }

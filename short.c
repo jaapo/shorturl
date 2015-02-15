@@ -57,8 +57,7 @@ uint64_t save_url(struct hashtable *ht, const char *url, int len) {
 
 	uint64_t urlid = next_id();
 	int k = ht_insert(ht, urlid, stored);
-	if (k < 0) {
-		printf("error\n");
+	if (k == -1) {
 		return 0;
 	}
 
