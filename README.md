@@ -6,12 +6,12 @@ This is a simple URL shortener.
 Build
 -----
 
-		make
+	make
 
 Start
 -----
 
-		./bin/main.o 8080
+	./bin/main.o 8080
 
 Use
 ---
