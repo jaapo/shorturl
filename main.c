@@ -19,27 +19,21 @@
 #define MIN(a,b) (a<b?a:b)
 #define STREQU(a,b) !strncmp(a,b,MIN(strlen(a),strlen(b)))
 
-#define DOCROOT "html/"
-
 static struct hashtable ht;
+static char* DOCROOT;
 
 int file_response(char* buffer, int buflen, char* req_fn) {
 	int len = -1;
 	int filesize, err, fd, left;
+	struct stat fstat;
 	char filename[1024];
 	int fnlen;
 
-	if (req_fn[0] == '/') {
-		fnlen = snprintf(filename, sizeof filename, DOCROOT "%s", req_fn+1);
-		if (fnlen>sizeof filename) {
-			printf("requested filename too long\n");
-			exit(1);
-		}
-	} else {
-		printf("requested filename should start with '/'\n");
+	fnlen = snprintf(filename, sizeof filename, "%s%s", DOCROOT, req_fn[0]=='/' ? req_fn+1 : req_fn);
+	if (fnlen>sizeof filename) {
+		printf("requested filename too long\n");
 		exit(1);
 	}
-	struct stat fstat;
 
 	left = buflen;
 	err = stat(filename, &fstat);
@@ -70,11 +64,6 @@ int file_response(char* buffer, int buflen, char* req_fn) {
 	return len;
 }
 
-int shortened_response(char* buffer, int buflen, char* shorturl) {
-	len = 
-	return len;
-}
-
 int www_decode(char* str) {
 	int i=0,j=0;
 
@@ -102,7 +91,7 @@ void httpreq(int sd) {
 	char content[1024];
 	read(sd, buffer, sizeof(buffer));
 	
-	int reslen;
+	int reslen, len;
 	char *line, *req, *res;
 	req = strtok(buffer, "\n");
 
@@ -118,8 +107,8 @@ void httpreq(int sd) {
 		} else if (line[0] == '\r' && line[1] == '\0') {
 			//end of header, rest is content
 			line = strtok(NULL, "\n");
-			memcpy(content, line, len);
-			content[len]='\0';
+			memcpy(content, line, content_len);
+			content[content_len]='\0';
 			break;
 		}
 	}
@@ -171,11 +160,12 @@ void httpreq(int sd) {
 }
 
 int main(int argc, char** argv) {
-	if (argc != 2) {
-		printf("usage: %s port\n", argv[0]);
+	if (argc != 3) {
+		printf("usage: %s port docroot\n", argv[0]);
 		exit(1);
 	}
 
+	DOCROOT = argv[2];
 	ht = ht_init(100);
 
 	int listsd, err;
