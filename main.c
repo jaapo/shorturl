@@ -119,6 +119,7 @@ void httpreq(int sd) {
 			reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 301 Moved Permanently\r\nLocation: %s\r\n\r\n", url);
 		} else {
 			reslen = error_response(buffer, sizeof buffer, 404);
+			goto done;
 		}
 
 		if (reslen >= sizeof buffer) {
@@ -142,16 +143,21 @@ void httpreq(int sd) {
 		}
 
 		uint64_t urlid = save_url(&ht, url, len);
+		if (urlid == 0) {
+			reslen = error_response(buffer, sizeof buffer, 500);
+			goto done;
+		}
 		char shorturl[HANDLELEN];
-		int surl_len = strlen(shorturl);
-
+		int surl_len;
+		
 		key_to_str(urlid, shorturl);
+		surl_len = strlen(shorturl);
+
 		printf("shortened %s => %s\n", url, shorturl);
 		reslen = snprintf(buffer, sizeof buffer, "HTTP/1.1 200 OK\r\nLength: %d\r\nContent-Type: text/plain\r\n\r\n%s", surl_len, shorturl);
 	} else {
 		reslen = error_response(buffer, sizeof buffer, 400);
 		printf("unknown request %s\n", req);
-		goto done;
 	}
 
 done:
